@@ -407,6 +407,8 @@ const cfg = {
       '/v1/webapi/requestableroles?startKey=:startKey?&search=:search?&limit=:limit?',
     githubConnectorsPath: '/v1/webapi/github/:name?',
     githubConnectorPath: '/v1/webapi/github/connector/:name',
+    oidcConnectorsPath: '/v1/webapi/oidc/:name?',
+    oidcConnectorPath: '/v1/webapi/oidc/connector/:name',
     trustedClustersPath: '/v1/webapi/trustedcluster/:name?',
     connectMyComputerLoginsPath: '/v1/webapi/connectmycomputer/logins',
 
@@ -1409,6 +1411,14 @@ const cfg = {
 
   getGithubConnectorUrl(name: string) {
     return generatePath(cfg.api.githubConnectorPath, { name });
+  },
+
+  getOIDCConnectorsUrl(name?: string) {
+    return generatePath(cfg.api.oidcConnectorsPath, { name });
+  },
+
+  getOIDCConnectorUrl(name: string) {
+    return generatePath(cfg.api.oidcConnectorPath, { name });
   },
 
   getTrustedClustersUrl(name?: string) {

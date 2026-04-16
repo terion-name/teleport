@@ -17,4 +17,5 @@
  */
 
 export { AuthConnectorEditorContent } from './AuthConnectorEditorContent';
+export { AuthConnectorEditor } from './GitHubConnectorEditor';
 export { GitHubConnectorEditor } from './GitHubConnectorEditor';

@@ -225,6 +225,29 @@ func (h *Handler) getGithubConnectorsHandle(w http.ResponseWriter, r *http.Reque
 	}, nil
 }
 
+func (h *Handler) getAuthConnectorsHandle(w http.ResponseWriter, r *http.Request, params httprouter.Params, ctx *SessionContext) (any, error) {
+	clt, err := ctx.GetClient()
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	connectors, err := getAuthConnectors(r.Context(), clt)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	defaultConnectorName, defaultConnectorType, err := ProcessDefaultConnector(r.Context(), clt, connectors)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	return &ui.ListAuthConnectorsResponse{
+		DefaultConnectorName: defaultConnectorName,
+		DefaultConnectorType: defaultConnectorType,
+		Connectors:           connectors,
+	}, nil
+}
+
 // ProcessDefaultConnector returns the default connector type and validates that the provided connectors list contains the default connector that is set in the auth preference.
 // If it isn't, it will return a fallback connector which should be used as the default, as well as update the actual auth preference to reflect the change.
 func ProcessDefaultConnector(ctx context.Context, clt authclient.ClientI, connectors []ui.ResourceItem) (connectorName string, connectorType string, err error) {
@@ -287,6 +310,61 @@ func getGithubConnectors(ctx context.Context, clt resourcesAPIGetter) ([]ui.Reso
 	return ui.NewGithubConnectors(connectors)
 }
 
+func getOIDCConnectors(ctx context.Context, clt resourcesAPIGetter) ([]ui.ResourceItem, error) {
+	connectors, err := clientutils.CollectWithFallback(ctx,
+		func(ctx context.Context, limit int, start string) ([]types.OIDCConnector, string, error) {
+			return clt.ListOIDCConnectors(ctx, limit, start, true)
+		},
+		func(ctx context.Context) ([]types.OIDCConnector, error) {
+			return clt.GetOIDCConnectors(ctx, true)
+		},
+	)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	return ui.NewOIDCConnectors(connectors)
+}
+
+func getSAMLConnectors(ctx context.Context, clt resourcesAPIGetter) ([]ui.ResourceItem, error) {
+	connectors, err := clientutils.CollectWithFallback(ctx,
+		func(ctx context.Context, limit int, start string) ([]types.SAMLConnector, string, error) {
+			return clt.ListSAMLConnectorsWithOptions(ctx, limit, start, true)
+		},
+		func(ctx context.Context) ([]types.SAMLConnector, error) {
+			return clt.GetSAMLConnectors(ctx, true)
+		},
+	)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	return ui.NewSAMLConnectors(connectors)
+}
+
+func getAuthConnectors(ctx context.Context, clt resourcesAPIGetter) ([]ui.ResourceItem, error) {
+	github, err := getGithubConnectors(ctx, clt)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	oidc, err := getOIDCConnectors(ctx, clt)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	saml, err := getSAMLConnectors(ctx, clt)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	connectors := make([]ui.ResourceItem, 0, len(github)+len(oidc)+len(saml))
+	connectors = append(connectors, github...)
+	connectors = append(connectors, oidc...)
+	connectors = append(connectors, saml...)
+	return connectors, nil
+}
+
 func (h *Handler) deleteGithubConnector(w http.ResponseWriter, r *http.Request, params httprouter.Params, ctx *SessionContext) (any, error) {
 	clt, err := ctx.GetClient()
 	if err != nil {
@@ -307,13 +385,83 @@ func (h *Handler) deleteGithubConnector(w http.ResponseWriter, r *http.Request, 
 	defaultConnectorType := authPref.GetType()
 	// If the connector being deleted is the default, have the auth preference fallback to another connector.
 	if defaultConnectorType == constants.Github && defaultConnectorName == connectorName {
-		connectors, err := getGithubConnectors(r.Context(), clt)
+		connectors, err := getAuthConnectors(r.Context(), clt)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
 
 		_, _, err = ProcessDefaultConnector(r.Context(), clt, connectors)
 		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+	}
+
+	return OK(), nil
+}
+
+// getOIDCConnectorHandle returns an OIDC connector by name.
+func (h *Handler) getOIDCConnectorHandle(w http.ResponseWriter, r *http.Request, params httprouter.Params, ctx *SessionContext) (any, error) {
+	clt, err := ctx.GetClient()
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	connector, err := clt.GetOIDCConnector(r.Context(), params.ByName("name"), true)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	return ui.NewResourceItem(connector)
+}
+
+func (h *Handler) getOIDCConnectorsHandle(w http.ResponseWriter, r *http.Request, params httprouter.Params, ctx *SessionContext) (any, error) {
+	clt, err := ctx.GetClient()
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	connectors, err := getOIDCConnectors(r.Context(), clt)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	defaultConnectorName, defaultConnectorType, err := ProcessDefaultConnector(r.Context(), clt, connectors)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	return &ui.ListAuthConnectorsResponse{
+		DefaultConnectorName: defaultConnectorName,
+		DefaultConnectorType: defaultConnectorType,
+		Connectors:           connectors,
+	}, nil
+}
+
+func (h *Handler) deleteOIDCConnector(w http.ResponseWriter, r *http.Request, params httprouter.Params, ctx *SessionContext) (any, error) {
+	clt, err := ctx.GetClient()
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	connectorName := params.ByName("name")
+	if err := clt.DeleteOIDCConnector(r.Context(), connectorName); err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	authPref, err := clt.GetAuthPreference(r.Context())
+	if err != nil {
+		return nil, trace.Wrap(err, "failed to get auth preference")
+	}
+
+	defaultConnectorName := authPref.GetConnectorName()
+	defaultConnectorType := authPref.GetType()
+	if defaultConnectorType == constants.OIDC && defaultConnectorName == connectorName {
+		connectors, err := getAuthConnectors(r.Context(), clt)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+
+		if _, _, err := ProcessDefaultConnector(r.Context(), clt, connectors); err != nil {
 			return nil, trace.Wrap(err)
 		}
 	}
@@ -338,6 +486,26 @@ func (h *Handler) createGithubConnectorHandle(w http.ResponseWriter, r *http.Req
 	}
 
 	item, err := CreateResource(r, types.KindGithubConnector, services.UnmarshalGithubConnector, clt.CreateGithubConnector)
+	return item, trace.Wrap(err)
+}
+
+func (h *Handler) updateOIDCConnectorHandle(w http.ResponseWriter, r *http.Request, params httprouter.Params, ctx *SessionContext) (any, error) {
+	clt, err := ctx.GetClient()
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	item, err := UpdateResource[types.OIDCConnector](r, params, types.KindOIDCConnector, services.UnmarshalOIDCConnector, clt.UpdateOIDCConnector)
+	return item, trace.Wrap(err)
+}
+
+func (h *Handler) createOIDCConnectorHandle(w http.ResponseWriter, r *http.Request, params httprouter.Params, ctx *SessionContext) (any, error) {
+	clt, err := ctx.GetClient()
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	item, err := CreateResource(r, types.KindOIDCConnector, services.UnmarshalOIDCConnector, clt.CreateOIDCConnector)
 	return item, trace.Wrap(err)
 }
 
@@ -701,6 +869,16 @@ type resourcesAPIGetter interface {
 	GetGithubConnector(ctx context.Context, id string, withSecrets bool) (types.GithubConnector, error)
 	// DeleteGithubConnector deletes the specified Github connector
 	DeleteGithubConnector(ctx context.Context, id string) error
+	// GetOIDCConnectors returns all configured OIDC connectors.
+	GetOIDCConnectors(ctx context.Context, withSecrets bool) ([]types.OIDCConnector, error)
+	// ListOIDCConnectors returns a page of valid registered OIDC connectors.
+	ListOIDCConnectors(ctx context.Context, limit int, start string, withSecrets bool) ([]types.OIDCConnector, string, error)
+	// GetOIDCConnector returns the specified OIDC connector.
+	GetOIDCConnector(ctx context.Context, id string, withSecrets bool) (types.OIDCConnector, error)
+	// GetSAMLConnectors returns all configured SAML connectors.
+	GetSAMLConnectors(ctx context.Context, withSecrets bool) ([]types.SAMLConnector, error)
+	// ListSAMLConnectorsWithOptions returns a page of valid registered SAML connectors.
+	ListSAMLConnectorsWithOptions(ctx context.Context, limit int, start string, withSecrets bool, opts ...types.SAMLConnectorValidationOption) ([]types.SAMLConnector, string, error)
 	// UpsertTrustedCluster creates or updates a TrustedCluster in the backend.
 	UpsertTrustedCluster(ctx context.Context, tc types.TrustedCluster) (types.TrustedCluster, error)
 	// GetTrustedCluster returns a single TrustedCluster by name.

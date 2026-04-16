@@ -1036,6 +1036,9 @@ func (h *Handler) bindDefaultEndpoints() {
 	h.GET("/webapi/sites/:site/kubernetesservers", h.WithClusterAuth(h.clusterKubeServersList))
 
 	// Github connector handlers
+	h.GET("/webapi/oidc/login/web", h.WithRedirect(h.oidcLoginWeb))
+	h.GET("/webapi/oidc/callback", h.WithMetaRedirect(h.oidcCallback))
+	h.POST("/webapi/oidc/login/console", h.WithLimiter(h.oidcLoginConsole))
 	h.GET("/webapi/github/login/web", h.WithRedirect(h.githubLoginWeb))
 	h.GET("/webapi/github/callback", h.WithMetaRedirect(h.githubCallback))
 	h.POST("/webapi/github/login/console", h.WithLimiter(h.githubLoginConsole))
@@ -1080,6 +1083,7 @@ func (h *Handler) bindDefaultEndpoints() {
 	h.GET("/webapi/requestableroles", h.WithAuth(h.listRequestableRolesHandle))
 	h.GET("/webapi/presetroles", h.WithUnauthenticatedHighLimiter(h.getPresetRoles))
 
+	h.GET("/webapi/authconnectors", h.WithAuth(h.getAuthConnectorsHandle))
 	h.GET("/webapi/github", h.WithAuth(h.getGithubConnectorsHandle))
 	h.POST("/webapi/github", h.WithAuth(h.createGithubConnectorHandle))
 	// The extra "connector" in the path is to avoid a wildcard conflict with the github handlers used
@@ -1087,6 +1091,13 @@ func (h *Handler) bindDefaultEndpoints() {
 	h.GET("/webapi/github/connector/:name", h.WithAuth(h.getGithubConnectorHandle))
 	h.PUT("/webapi/github/:name", h.WithAuth(h.updateGithubConnectorHandle))
 	h.DELETE("/webapi/github/:name", h.WithAuth(h.deleteGithubConnector))
+	h.GET("/webapi/oidc", h.WithAuth(h.getOIDCConnectorsHandle))
+	h.POST("/webapi/oidc", h.WithAuth(h.createOIDCConnectorHandle))
+	// The extra "connector" in the path is to avoid a wildcard conflict with the oidc handlers used
+	// during the login flow ("oidc/login/web" and "oidc/callback").
+	h.GET("/webapi/oidc/connector/:name", h.WithAuth(h.getOIDCConnectorHandle))
+	h.PUT("/webapi/oidc/:name", h.WithAuth(h.updateOIDCConnectorHandle))
+	h.DELETE("/webapi/oidc/:name", h.WithAuth(h.deleteOIDCConnector))
 
 	// Sets the default connector in the auth preference.
 	h.PUT("/webapi/authconnector/default", h.WithAuth(h.setDefaultConnectorHandle))
@@ -2412,6 +2423,39 @@ func (h *Handler) motd(w http.ResponseWriter, r *http.Request, p httprouter.Para
 	return webclient.MotD{Text: authPrefs.GetMessageOfTheDay()}, nil
 }
 
+func (h *Handler) oidcLoginWeb(w http.ResponseWriter, r *http.Request, p httprouter.Params) string {
+	logger := h.logger.With("auth", "oidc")
+	logger.DebugContext(r.Context(), "Web login start")
+
+	req, err := ParseSSORequestParams(r)
+	if err != nil {
+		logger.ErrorContext(r.Context(), "Failed to extract SSO parameters from request", "error", err)
+		return sso.LoginFailedRedirectURL
+	}
+
+	remoteAddr, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		logger.ErrorContext(r.Context(), "Failed to parse request remote address", "error", err)
+		return sso.LoginFailedRedirectURL
+	}
+
+	response, err := h.cfg.ProxyClient.CreateOIDCAuthRequest(r.Context(), types.OIDCAuthRequest{
+		CSRFToken:         req.CSRFToken,
+		ConnectorID:       req.ConnectorID,
+		CreateWebSession:  true,
+		ClientRedirectURL: req.ClientRedirectURL,
+		ClientLoginIP:     remoteAddr,
+		ClientUserAgent:   r.UserAgent(),
+		LoginHint:         req.LoginHint,
+	})
+	if err != nil {
+		logger.ErrorContext(r.Context(), "Error creating auth request", "error", err)
+		return sso.LoginFailedRedirectURL
+	}
+
+	return response.RedirectURL
+}
+
 func (h *Handler) githubLoginWeb(w http.ResponseWriter, r *http.Request, p httprouter.Params) string {
 	logger := h.logger.With("auth", "github")
 	logger.DebugContext(r.Context(), "Web login start")
@@ -2442,6 +2486,55 @@ func (h *Handler) githubLoginWeb(w http.ResponseWriter, r *http.Request, p httpr
 	}
 
 	return response.RedirectURL
+}
+
+func (h *Handler) oidcLoginConsole(w http.ResponseWriter, r *http.Request, p httprouter.Params) (any, error) {
+	logger := h.logger.With("auth", "oidc")
+	logger.DebugContext(r.Context(), "Console login start")
+
+	req := new(client.SSOLoginConsoleReq)
+	if err := httplib.ReadResourceJSON(r, req); err != nil {
+		logger.ErrorContext(r.Context(), "Error reading json", "error", err)
+		return nil, trace.AccessDenied("%s", SSOLoginFailureMessage)
+	}
+
+	if err := req.CheckAndSetDefaults(); err != nil {
+		logger.ErrorContext(r.Context(), "Missing request parameters", "error", err)
+		return nil, trace.AccessDenied("%s", SSOLoginFailureMessage)
+	}
+
+	remoteAddr, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		logger.ErrorContext(r.Context(), "Failed to parse request remote address", "error", err)
+		return nil, trace.AccessDenied("%s", SSOLoginFailureMessage)
+	}
+
+	response, err := h.cfg.ProxyClient.CreateOIDCAuthRequest(r.Context(), types.OIDCAuthRequest{
+		ConnectorID:             req.ConnectorID,
+		SshPublicKey:            req.SSHPubKey,
+		TlsPublicKey:            req.TLSPubKey,
+		SshAttestationStatement: req.SSHAttestationStatement.ToProto(),
+		TlsAttestationStatement: req.TLSAttestationStatement.ToProto(),
+		CertTTL:                 req.CertTTL,
+		ClientRedirectURL:       req.RedirectURL,
+		Compatibility:           req.Compatibility,
+		RouteToCluster:          req.RouteToCluster,
+		KubernetesCluster:       req.KubernetesCluster,
+		ClientLoginIP:           remoteAddr,
+		PkceVerifier:            req.PKCEVerifier,
+		Scope:                   req.Scope,
+	})
+	if err != nil {
+		logger.ErrorContext(r.Context(), "Failed to create OIDC auth request", "error", err)
+		if strings.Contains(err.Error(), auth.InvalidClientRedirectErrorMessage) {
+			return nil, trace.AccessDenied("%s", SSOLoginFailureInvalidRedirect)
+		}
+		return nil, trace.AccessDenied("%s", SSOLoginFailureMessage)
+	}
+
+	return &client.SSOLoginConsoleResponse{
+		RedirectURL: response.RedirectURL,
+	}, nil
 }
 
 func (h *Handler) githubLoginConsole(w http.ResponseWriter, r *http.Request, p httprouter.Params) (any, error) {
@@ -2490,6 +2583,79 @@ func (h *Handler) githubLoginConsole(w http.ResponseWriter, r *http.Request, p h
 	return &client.SSOLoginConsoleResponse{
 		RedirectURL: response.RedirectURL,
 	}, nil
+}
+
+func (h *Handler) oidcCallback(w http.ResponseWriter, r *http.Request, p httprouter.Params) string {
+	logger := h.logger.With("auth", "oidc")
+	logger.DebugContext(r.Context(), "Callback start", "query", r.URL.Query())
+
+	response, err := h.cfg.ProxyClient.ValidateOIDCAuthCallback(r.Context(), r.URL.Query())
+	if err != nil {
+		logger.ErrorContext(r.Context(), "Error while processing callback", "error", err)
+
+		if requestID := r.URL.Query().Get("state"); requestID != "" {
+			if request, errGet := h.cfg.ProxyClient.GetOIDCAuthRequest(r.Context(), requestID); errGet == nil && !request.CreateWebSession {
+				if redURL, errEnc := RedirectURLWithError(request.ClientRedirectURL, err); errEnc == nil {
+					return redURL.String()
+				}
+			}
+		}
+
+		return sso.LoginFailedBadCallbackRedirectURL
+	}
+
+	if response.Req.CreateWebSession {
+		logger.InfoContext(r.Context(), "Redirecting to web browser")
+
+		res := &SSOCallbackResponse{
+			CSRFToken:         response.Req.CSRFToken,
+			Username:          response.Username,
+			SessionName:       response.Session.GetName(),
+			SessionExpiry:     response.Session.Expiry(),
+			ClientRedirectURL: response.Req.ClientRedirectURL,
+			MFAToken:          response.MFAToken,
+		}
+
+		if err := SSOSetWebSessionAndRedirectURL(w, r, res, true); err != nil {
+			logger.ErrorContext(r.Context(), "Error setting web session.", "error", err)
+			return sso.LoginFailedRedirectURL
+		}
+
+		if dwt := response.Session.GetDeviceWebToken(); dwt != nil {
+			logger.DebugContext(r.Context(), "OIDC WebSession created with device web token")
+			redirectPath, err := BuildDeviceWebRedirectPath(dwt, res.ClientRedirectURL)
+			if err != nil {
+				logger.DebugContext(r.Context(), "Invalid device web token", "error", err)
+			}
+			return redirectPath
+		}
+		return res.ClientRedirectURL
+	}
+
+	logger.InfoContext(r.Context(), "Callback is redirecting to console login")
+	if len(response.Req.SSHPubKey)+len(response.Req.TLSPubKey) == 0 {
+		logger.ErrorContext(r.Context(), "Not a web or console login request")
+		return sso.LoginFailedRedirectURL
+	}
+
+	redirectURL, err := ConstructSSHResponse(AuthParams{
+		ClientRedirectURL: response.Req.ClientRedirectURL,
+		Username:          response.Username,
+		Identity:          response.Identity,
+		Session:           response.Session,
+		Cert:              response.Cert,
+		TLSCert:           response.TLSCert,
+		HostSigners:       response.HostSigners,
+		FIPS:              h.cfg.FIPS,
+		MFAToken:          response.MFAToken,
+		ClientOptions:     response.ClientOptions,
+	})
+	if err != nil {
+		logger.ErrorContext(r.Context(), "Error constructing ssh response", "error", err)
+		return sso.LoginFailedRedirectURL
+	}
+
+	return redirectURL.String()
 }
 
 func (h *Handler) githubCallback(w http.ResponseWriter, r *http.Request, p httprouter.Params) string {

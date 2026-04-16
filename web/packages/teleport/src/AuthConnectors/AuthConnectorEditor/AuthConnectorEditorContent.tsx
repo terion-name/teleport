@@ -30,6 +30,7 @@ import TextEditor from 'shared/components/TextEditor';
 import { Attempt } from 'shared/hooks/useAsync';
 
 import { FeatureBox, FeatureHeaderTitle } from 'teleport/components/Layout';
+import { KindAuthConnectors } from 'teleport/services/resources';
 
 import { InfoGuide } from '../AuthConnectors';
 
@@ -46,7 +47,7 @@ export function AuthConnectorEditorContent({
   onSave,
   onCancel,
   setContent,
-  isGithub,
+  connectorType,
 }: Props) {
   return (
     <FeatureBox>
@@ -65,7 +66,7 @@ export function AuthConnectorEditorContent({
             </Box>
           </Flex>
           <InfoGuideButton
-            config={{ guide: <InfoGuide isGitHub={isGithub} /> }}
+            config={{ guide: <InfoGuide connectorType={connectorType} /> }}
           />
         </Flex>
       </FeatureHeaderTitle>
@@ -124,5 +125,5 @@ type Props = {
   onSave: () => void;
   onCancel: () => void;
   setContent: (content: string) => void;
-  isGithub?: boolean;
+  connectorType: KindAuthConnectors;
 };

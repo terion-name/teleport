@@ -86,18 +86,33 @@ class ResourceService {
     defaultConnector: DefaultAuthConnector;
     connectors: Resource<'github'>[];
   }> {
+    const result = await this.fetchAuthConnectors();
+    return {
+      defaultConnector: result.defaultConnector,
+      connectors: result.connectors.filter(
+        connector => connector.kind === 'github'
+      ) as Resource<'github'>[],
+    };
+  }
+
+  async fetchAuthConnectors(): Promise<{
+    defaultConnector: DefaultAuthConnector;
+    connectors: Resource<'github' | 'oidc' | 'saml'>[];
+  }> {
     // MFA reuse needs to be allowed in case we need to fallback to another default connector
     const challengeResponse =
       await await auth.getMfaChallengeResponseForAdminAction(true);
 
     return api
-      .get(cfg.getGithubConnectorsUrl(), undefined, challengeResponse)
+      .get(cfg.api.authConnectorsPath, undefined, challengeResponse)
       .then(res => ({
         defaultConnector: {
           name: res.defaultConnectorName,
           type: res.defaultConnectorType,
         },
-        connectors: makeResourceList<'github'>(res.connectors),
+        connectors: makeResourceList<'github' | 'oidc' | 'saml'>(
+          res.connectors
+        ),
       }));
   }
 
@@ -222,6 +237,12 @@ class ResourceService {
       .then(res => makeResource<'github'>(res));
   }
 
+  createOIDCConnector(content: string) {
+    return api
+      .post(cfg.getOIDCConnectorsUrl(), { content })
+      .then(res => makeResource<'oidc'>(res));
+  }
+
   updateTrustedCluster(name: string, content: string) {
     return api
       .put(cfg.getTrustedClustersUrl(name), { content })
@@ -243,10 +264,22 @@ class ResourceService {
       .then(res => makeResource<'github'>(res));
   }
 
+  fetchOIDCConnector(name: string) {
+    return api
+      .get(cfg.getOIDCConnectorUrl(name))
+      .then(res => makeResource<'oidc'>(res));
+  }
+
   updateGithubConnector(name: string, content: string) {
     return api
       .put(cfg.getGithubConnectorsUrl(name), { content })
       .then(res => makeResource<'github'>(res));
+  }
+
+  updateOIDCConnector(name: string, content: string) {
+    return api
+      .put(cfg.getOIDCConnectorsUrl(name), { content })
+      .then(res => makeResource<'oidc'>(res));
   }
 
   deleteTrustedCluster(name: string) {
@@ -259,6 +292,10 @@ class ResourceService {
 
   deleteGithubConnector(name: string) {
     return api.delete(cfg.getGithubConnectorsUrl(name));
+  }
+
+  deleteOIDCConnector(name: string) {
+    return api.delete(cfg.getOIDCConnectorsUrl(name));
   }
 }
 

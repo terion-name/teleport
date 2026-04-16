@@ -22,25 +22,42 @@ import { useNavigate, useParams } from 'react-router';
 import { useAsync } from 'shared/hooks/useAsync';
 
 import cfg from 'teleport/config';
+import { KindAuthConnectors } from 'teleport/services/resources';
 import useTeleport from 'teleport/useTeleport';
 
 import templates from '../templates';
 import { AuthConnectorEditorContent } from './AuthConnectorEditorContent';
 
+function isManagedAuthConnector(
+  kind: KindAuthConnectors | undefined
+): kind is 'github' | 'oidc' {
+  return kind === 'github' || kind === 'oidc';
+}
+
 /**
- * GitHubConnectorEditor is the edit/create page for a GitHub Auth Connector.
+ * AuthConnectorEditor is the edit/create page for a YAML-based auth connector.
  */
-export function GitHubConnectorEditor({ isNew = false }) {
-  const { connectorName } = useParams<{ connectorName: string }>();
+export function AuthConnectorEditor({ isNew = false }) {
+  const { connectorName, connectorType } = useParams<{
+    connectorName: string;
+    connectorType: KindAuthConnectors;
+  }>();
   const ctx = useTeleport();
   const navigate = useNavigate();
+  const managedKind = isManagedAuthConnector(connectorType)
+    ? connectorType
+    : 'oidc';
+  const initialTemplate = templates[managedKind];
 
-  const [content, setContent] = useState(templates['github']);
-  const [initialContent, setInitialContent] = useState(templates['github']);
+  const [content, setContent] = useState(initialTemplate);
+  const [initialContent, setInitialContent] = useState(initialTemplate);
 
   const [fetchAttempt, fetchConnector] = useAsync(async () => {
     if (!isNew) {
-      const res = await ctx.resourceService.fetchGithubConnector(connectorName);
+      const res =
+        managedKind === 'oidc'
+          ? await ctx.resourceService.fetchOIDCConnector(connectorName)
+          : await ctx.resourceService.fetchGithubConnector(connectorName);
       setContent(res.content);
       setInitialContent(res.content);
     }
@@ -50,29 +67,42 @@ export function GitHubConnectorEditor({ isNew = false }) {
   const [saveAttempt, saveConnector] = useAsync(
     useCallback(async () => {
       if (isNew) {
-        await ctx.resourceService
-          .createGithubConnector(content)
-          .then(() => navigate(cfg.routes.sso));
+        await (managedKind === 'oidc'
+          ? ctx.resourceService.createOIDCConnector(content)
+          : ctx.resourceService.createGithubConnector(content)
+        ).then(() => navigate(cfg.routes.sso));
       } else {
-        await ctx.resourceService
-          .updateGithubConnector(connectorName, content)
-          .then(() => navigate(cfg.routes.sso));
+        await (managedKind === 'oidc'
+          ? ctx.resourceService.updateOIDCConnector(connectorName, content)
+          : ctx.resourceService.updateGithubConnector(connectorName, content)
+        ).then(() => navigate(cfg.routes.sso));
       }
-    }, [connectorName, content, isNew, navigate, ctx.resourceService])
+    }, [
+      connectorName,
+      content,
+      isNew,
+      managedKind,
+      navigate,
+      ctx.resourceService,
+    ])
   );
 
   const isSaveDisabled =
     saveAttempt.status === 'processing' || content === initialContent;
 
   useEffect(() => {
+    if (!isNew && !isManagedAuthConnector(connectorType)) {
+      navigate(cfg.routes.sso, { replace: true });
+      return;
+    }
+
     if (fetchAttempt.status !== 'success') {
       fetchConnector();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [connectorType, fetchAttempt.status, fetchConnector, isNew, navigate]);
 
   const title = isNew
-    ? 'Creating new GitHub Auth Connector: '
+    ? `Creating new ${managedKind.toUpperCase()} Auth Connector`
     : `Editing Auth Connector: ${connectorName}`;
 
   return (
@@ -86,7 +116,11 @@ export function GitHubConnectorEditor({ isNew = false }) {
       onSave={saveConnector}
       onCancel={() => navigate(cfg.routes.sso)}
       setContent={setContent}
-      isGithub={true}
+      connectorType={managedKind}
     />
   );
+}
+
+export function GitHubConnectorEditor({ isNew = false }) {
+  return <AuthConnectorEditor isNew={isNew} />;
 }

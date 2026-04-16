@@ -810,6 +810,9 @@ func NewServer(cfg *InitConfig, opts ...ServerOption) (as *Server, err error) {
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
+	if as.modules.Features().GetEntitlement(entitlements.OIDC).Enabled {
+		as.SetOIDCService(newServerOIDCService(as))
+	}
 
 	scopedAccessCache, err := scopedaccesscache.NewCache(scopedaccesscache.CacheConfig{
 		Events:           cfg.Events,

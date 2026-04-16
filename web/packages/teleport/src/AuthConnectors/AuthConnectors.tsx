@@ -36,10 +36,14 @@ import { FeatureBox, FeatureHeaderTitle } from 'teleport/components/Layout';
 import { Route, Switch } from 'teleport/components/Router';
 import useResources from 'teleport/components/useResources';
 import cfg from 'teleport/config';
-import { DefaultAuthConnector, Resource } from 'teleport/services/resources';
+import {
+  DefaultAuthConnector,
+  KindAuthConnectors,
+  Resource,
+} from 'teleport/services/resources';
 import useTeleport from 'teleport/useTeleport';
 
-import { GitHubConnectorEditor } from './AuthConnectorEditor';
+import { AuthConnectorEditor } from './AuthConnectorEditor';
 import { ConnectorList } from './ConnectorList';
 import { CtaConnectors } from './ConnectorList/CTAConnectors';
 import DeleteConnectorDialog from './DeleteConnectorDialog';
@@ -58,12 +62,12 @@ export function AuthConnectorsContainer() {
       <Route
         key="auth-connector-edit"
         path={cfg.routes.ssoConnector.edit}
-        element={<GitHubConnectorEditor />}
+        element={<AuthConnectorEditor />}
       />
       <Route
         key="auth-connector-new"
         path={cfg.routes.ssoConnector.create}
-        element={<GitHubConnectorEditor isNew={true} />}
+        element={<AuthConnectorEditor isNew={true} />}
       />
       <Route
         key="auth-connector-list"
@@ -80,13 +84,13 @@ export function AuthConnectorsContainer() {
  */
 export function AuthConnectors() {
   const ctx = useTeleport();
-  const [items, setItems] = useState<Resource<'github'>[]>([]);
+  const [items, setItems] = useState<Resource<KindAuthConnectors>[]>([]);
   const [defaultConnector, setDefaultConnector] =
     useState<DefaultAuthConnector>();
 
   const [fetchAttempt, fetchConnectors] = useAsync(
     useCallback(async () => {
-      return await ctx.resourceService.fetchGithubConnectors().then(res => {
+      return await ctx.resourceService.fetchAuthConnectors().then(res => {
         setItems(res.connectors);
         setDefaultConnector(res.defaultConnector);
       });
@@ -108,10 +112,11 @@ export function AuthConnectors() {
     });
   }
 
-  function remove(name: string) {
-    return ctx.resourceService
-      .deleteGithubConnector(name)
-      .then(fetchConnectors);
+  function remove(name: string, kind: KindAuthConnectors) {
+    return (kind === 'oidc'
+      ? ctx.resourceService.deleteOIDCConnector(name)
+      : ctx.resourceService.deleteGithubConnector(name)
+    ).then(fetchConnectors);
   }
 
   useEffect(() => {
@@ -144,12 +149,12 @@ export function AuthConnectors() {
     <FeatureBox>
       <ResponsiveFeatureHeader>
         <FeatureHeaderTitle>Auth Connectors</FeatureHeaderTitle>
-        <InfoGuideButton config={{ guide: <InfoGuide isGitHub={true} /> }}>
+        <InfoGuideButton config={{ guide: <InfoGuide connectorType="oidc" /> }}>
           <ResponsiveAddButton
             fill="border"
-            onClick={() => navigate(cfg.getCreateAuthConnectorRoute('github'))}
+            onClick={() => navigate(cfg.getCreateAuthConnectorRoute('oidc'))}
           >
-            New GitHub Connector
+            New Connector
           </ResponsiveAddButton>
         </InfoGuideButton>
       </ResponsiveFeatureHeader>
@@ -174,8 +179,8 @@ export function AuthConnectors() {
               )}
               {isEmpty ? (
                 <EmptyList
-                  onCreate={() =>
-                    navigate(cfg.getCreateAuthConnectorRoute('github'))
+                  onCreate={kind =>
+                    navigate(cfg.getCreateAuthConnectorRoute(kind))
                   }
                   isLocalDefault={defaultConnector.type === 'local'}
                 />
@@ -197,7 +202,7 @@ export function AuthConnectors() {
           name={resources.item.name}
           kind={resources.item.kind}
           onClose={resources.disregard}
-          onDelete={() => remove(resources.item.name)}
+          onDelete={() => remove(resources.item.name, resources.item.kind)}
           isDefault={defaultConnector.name === resources.item.name}
           nextDefault={nextDefaultConnector}
         />
@@ -206,7 +211,11 @@ export function AuthConnectors() {
   );
 }
 
-export const InfoGuide = ({ isGitHub = false }) => (
+export const InfoGuide = ({
+  connectorType = 'oidc',
+}: {
+  connectorType?: KindAuthConnectors;
+}) => (
   <Box>
     <InfoParagraph>
       Auth connectors allow Teleport to authenticate users via an external
@@ -215,14 +224,14 @@ export const InfoGuide = ({ isGitHub = false }) => (
     </InfoParagraph>
     <ReferenceLinks
       links={[
-        isGitHub
+        connectorType === 'github'
           ? {
               title: 'Configure GitHub connector',
               href: 'https://goteleport.com/docs/zero-trust-access/sso/integrate-idp/github-sso/',
             }
           : {
-              title: 'Samples of different connectors',
-              href: 'https://goteleport.com/docs/zero-trust-access/sso/integrate-idp/#integrating-your-provider',
+              title: 'Configure OIDC connector',
+              href: 'https://goteleport.com/docs/zero-trust-access/sso/integrate-idp/oidc/',
             },
       ]}
     />

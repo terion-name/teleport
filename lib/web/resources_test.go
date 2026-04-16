@@ -40,8 +40,11 @@ import (
 	"github.com/gravitational/teleport/api/constants"
 	kubeproto "github.com/gravitational/teleport/api/gen/proto/go/teleport/kube/v1"
 	"github.com/gravitational/teleport/api/types"
+	"github.com/gravitational/teleport/entitlements"
 	"github.com/gravitational/teleport/lib/defaults"
 	"github.com/gravitational/teleport/lib/itertools/stream"
+	"github.com/gravitational/teleport/lib/modules"
+	"github.com/gravitational/teleport/lib/modules/modulestest"
 	"github.com/gravitational/teleport/lib/services"
 	"github.com/gravitational/teleport/lib/web/ui"
 )
@@ -596,6 +599,130 @@ func TestGithubConnectorsCRUD(t *testing.T) {
 	}
 }
 
+func TestOIDCConnectorsCRUD(t *testing.T) {
+	ctx := context.Background()
+	testModules := enterpriseSSOModules()
+	env := newWebPack(t, 1, withModules(testModules))
+	proxy := env.proxies[0]
+
+	pack := proxy.authPack(t, "test-user@example.com", nil)
+
+	createPayload := func(connector types.OIDCConnector) ui.ResourceItem {
+		raw, err := services.MarshalOIDCConnector(connector, services.PreserveRevision())
+		require.NoError(t, err)
+
+		return ui.ResourceItem{
+			Kind:    types.KindOIDCConnector,
+			Name:    connector.GetName(),
+			Content: string(raw),
+		}
+	}
+
+	unmarshalResponse := func(resp []byte) types.OIDCConnector {
+		var item ui.ResourceItem
+		require.NoError(t, json.Unmarshal(resp, &item))
+
+		var conn types.OIDCConnectorV3
+		require.NoError(t, yaml.Unmarshal([]byte(item.Content), &conn))
+		return &conn
+	}
+
+	expected := makeOIDCConnector(t, "oidc")
+
+	resp, err := pack.clt.PostJSON(ctx, pack.clt.Endpoint("webapi", "oidc"), createPayload(expected))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.Code())
+
+	created := unmarshalResponse(resp.Bytes())
+
+	created.SetDisplay("OIDC Test")
+	resp, err = pack.clt.PutJSON(ctx, pack.clt.Endpoint("webapi", "oidc", expected.GetName()), createPayload(created))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.Code())
+
+	updated := unmarshalResponse(resp.Bytes())
+	require.Equal(t, "OIDC Test", updated.GetDisplay())
+	require.NotEmpty(t, updated.GetClientSecret(), "OIDC connector secret should remain preserved on update")
+
+	resp, err = pack.clt.Get(ctx, pack.clt.Endpoint("webapi", "oidc"), url.Values{})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.Code())
+
+	var connResponse ui.ListAuthConnectorsResponse
+	require.NoError(t, json.Unmarshal(resp.Bytes(), &connResponse))
+	require.Len(t, connResponse.Connectors, 1)
+	require.Equal(t, constants.OIDC, connResponse.Connectors[0].Kind)
+
+	_, err = pack.clt.Delete(ctx, pack.clt.Endpoint("webapi", "oidc", expected.GetName()))
+	require.NoError(t, err)
+
+	resp, err = pack.clt.Get(ctx, pack.clt.Endpoint("webapi", "oidc"), url.Values{})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.Code())
+
+	require.NoError(t, json.Unmarshal(resp.Bytes(), &connResponse))
+	assert.Empty(t, connResponse.Connectors)
+}
+
+func TestAuthConnectorsCombinedEndpoint(t *testing.T) {
+	ctx := context.Background()
+	testModules := enterpriseSSOModules()
+	env := newWebPack(t, 1, withModules(testModules))
+	proxy := env.proxies[0]
+
+	pack := proxy.authPack(t, "test-user@example.com", nil)
+
+	github := makeGithubConnector(t, "github-1")
+	oidc := makeOIDCConnector(t, "oidc-1")
+	saml := makeSAMLConnector(t, "saml-1")
+	access, err := types.NewRole("access", types.RoleSpecV6{})
+	require.NoError(t, err)
+	_, err = env.server.Auth().CreateRole(ctx, access)
+	require.NoError(t, err)
+
+	for _, connector := range []types.Resource{github, oidc} {
+		item, err := ui.NewResourceItem(connector)
+		require.NoError(t, err)
+
+		endpoint := pack.clt.Endpoint("webapi", "github")
+		if connector.GetKind() == types.KindOIDCConnector {
+			endpoint = pack.clt.Endpoint("webapi", "oidc")
+		}
+
+		resp, err := pack.clt.PostJSON(ctx, endpoint, *item)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, resp.Code())
+	}
+
+	_, err = env.server.Auth().CreateSAMLConnector(ctx, saml)
+	require.NoError(t, err)
+
+	authPref, err := types.NewAuthPreference(types.AuthPreferenceSpecV2{
+		Type:          constants.OIDC,
+		ConnectorName: "missing",
+	})
+	require.NoError(t, err)
+	_, err = env.server.Auth().UpsertAuthPreference(ctx, authPref)
+	require.NoError(t, err)
+
+	resp, err := pack.clt.Get(ctx, pack.clt.Endpoint("webapi", "authconnectors"), url.Values{})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.Code())
+
+	var connResponse ui.ListAuthConnectorsResponse
+	require.NoError(t, json.Unmarshal(resp.Bytes(), &connResponse))
+	require.Len(t, connResponse.Connectors, 3)
+	assert.Equal(t, "saml-1", connResponse.DefaultConnectorName)
+	assert.Equal(t, constants.SAML, connResponse.DefaultConnectorType)
+
+	actualKinds := []string{
+		connResponse.Connectors[0].Kind,
+		connResponse.Connectors[1].Kind,
+		connResponse.Connectors[2].Kind,
+	}
+	assert.Equal(t, []string{constants.Github, constants.OIDC, constants.SAML}, actualKinds)
+}
+
 func TestGetTrustedClustersFallback(t *testing.T) {
 	ctx := context.Background()
 	m := &mockedResourceAPIGetter{}
@@ -790,6 +917,11 @@ type mockedResourceAPIGetter struct {
 	mockRangeGithubConnectors func(ctx context.Context, start, end string, withSecrets bool) iter.Seq2[types.GithubConnector, error]
 	mockGetGithubConnector    func(ctx context.Context, id string, withSecrets bool) (types.GithubConnector, error)
 	mockDeleteGithubConnector func(ctx context.Context, id string) error
+	mockGetOIDCConnectors     func(ctx context.Context, withSecrets bool) ([]types.OIDCConnector, error)
+	mockListOIDCConnectors    func(ctx context.Context, limit int, start string, withSecrets bool) ([]types.OIDCConnector, string, error)
+	mockGetOIDCConnector      func(ctx context.Context, id string, withSecrets bool) (types.OIDCConnector, error)
+	mockGetSAMLConnectors     func(ctx context.Context, withSecrets bool) ([]types.SAMLConnector, error)
+	mockListSAMLConnectors    func(ctx context.Context, limit int, start string, withSecrets bool, opts ...types.SAMLConnectorValidationOption) ([]types.SAMLConnector, string, error)
 	mockUpsertTrustedCluster  func(ctx context.Context, tc types.TrustedCluster) (types.TrustedCluster, error)
 	mockGetTrustedCluster     func(ctx context.Context, name string) (types.TrustedCluster, error)
 	mockGetTrustedClusters    func(ctx context.Context) ([]types.TrustedCluster, error)
@@ -878,6 +1010,46 @@ func (m *mockedResourceAPIGetter) DeleteGithubConnector(ctx context.Context, id 
 	}
 
 	return trace.NotImplemented("mockDeleteGithubConnector not implemented")
+}
+
+func (m *mockedResourceAPIGetter) GetOIDCConnectors(ctx context.Context, withSecrets bool) ([]types.OIDCConnector, error) {
+	if m.mockGetOIDCConnectors != nil {
+		return m.mockGetOIDCConnectors(ctx, withSecrets)
+	}
+
+	return nil, trace.NotImplemented("mockGetOIDCConnectors not implemented")
+}
+
+func (m *mockedResourceAPIGetter) ListOIDCConnectors(ctx context.Context, limit int, start string, withSecrets bool) ([]types.OIDCConnector, string, error) {
+	if m.mockListOIDCConnectors != nil {
+		return m.mockListOIDCConnectors(ctx, limit, start, withSecrets)
+	}
+
+	return nil, "", trace.NotImplemented("mockListOIDCConnectors not implemented")
+}
+
+func (m *mockedResourceAPIGetter) GetOIDCConnector(ctx context.Context, id string, withSecrets bool) (types.OIDCConnector, error) {
+	if m.mockGetOIDCConnector != nil {
+		return m.mockGetOIDCConnector(ctx, id, withSecrets)
+	}
+
+	return nil, trace.NotImplemented("mockGetOIDCConnector not implemented")
+}
+
+func (m *mockedResourceAPIGetter) GetSAMLConnectors(ctx context.Context, withSecrets bool) ([]types.SAMLConnector, error) {
+	if m.mockGetSAMLConnectors != nil {
+		return m.mockGetSAMLConnectors(ctx, withSecrets)
+	}
+
+	return nil, trace.NotImplemented("mockGetSAMLConnectors not implemented")
+}
+
+func (m *mockedResourceAPIGetter) ListSAMLConnectorsWithOptions(ctx context.Context, limit int, start string, withSecrets bool, opts ...types.SAMLConnectorValidationOption) ([]types.SAMLConnector, string, error) {
+	if m.mockListSAMLConnectors != nil {
+		return m.mockListSAMLConnectors(ctx, limit, start, withSecrets, opts...)
+	}
+
+	return nil, "", trace.NotImplemented("mockListSAMLConnectorsWithOptions not implemented")
 }
 
 func (m *mockedResourceAPIGetter) UpsertTrustedCluster(ctx context.Context, tc types.TrustedCluster) (types.TrustedCluster, error) {
@@ -1094,4 +1266,60 @@ func makeGithubConnector(t *testing.T, name string) types.GithubConnector {
 	})
 	require.NoError(t, err)
 	return connector
+}
+
+func makeOIDCConnector(t *testing.T, name string) types.OIDCConnector {
+	connector, err := types.NewOIDCConnector(name, types.OIDCConnectorSpecV3{
+		ClientID:     "client-id",
+		ClientSecret: "client-secret",
+		IssuerURL:    "https://issuer.example.com",
+		RedirectURLs: []string{"https://proxy.example.com/v1/webapi/oidc/callback"},
+		ClaimsToRoles: []types.ClaimMapping{
+			{
+				Claim: "groups",
+				Value: "developers",
+				Roles: []string{"access"},
+			},
+		},
+	})
+	require.NoError(t, err)
+	return connector
+}
+
+func makeSAMLConnector(t *testing.T, name string) types.SAMLConnector {
+	connector, err := types.NewSAMLConnector(name, types.SAMLConnectorSpecV2{
+		AssertionConsumerService: "https://proxy.example.com/v1/webapi/saml/acs/" + name,
+		SSO:                      "https://idp.example.com/sso",
+		Display:                  "SAML",
+		EntityDescriptor: `<?xml version="1.0" encoding="UTF-8"?>
+<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" entityID="test">
+  <md:IDPSSODescriptor WantAuthnRequestsSigned="false" protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+    <md:KeyDescriptor use="signing">
+      <ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+        <ds:X509Data>
+          <ds:X509Certificate></ds:X509Certificate>
+        </ds:X509Data>
+      </ds:KeyInfo>
+    </md:KeyDescriptor>
+    <md:NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress</md:NameIDFormat>
+    <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://idp.example.com/sso"/>
+  </md:IDPSSODescriptor>
+</md:EntityDescriptor>`,
+		AttributesToRoles: []types.AttributeMapping{
+			{
+				Name:  "groups",
+				Value: "developers",
+				Roles: []string{"access"},
+			},
+		},
+	})
+	require.NoError(t, err)
+	return connector
+}
+
+func enterpriseSSOModules() *modulestest.Modules {
+	testModules := modulestest.EnterpriseModules()
+	testModules.TestFeatures.Entitlements[entitlements.OIDC] = modules.EntitlementInfo{Enabled: true}
+	testModules.TestFeatures.Entitlements[entitlements.SAML] = modules.EntitlementInfo{Enabled: true}
+	return testModules
 }

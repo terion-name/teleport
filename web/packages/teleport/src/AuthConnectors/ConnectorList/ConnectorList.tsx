@@ -42,6 +42,7 @@ export function ConnectorList<T extends KindAuthConnectors>({
   items = items || [];
   const $items = items.map(item => {
     const { id, name, kind } = item;
+    const canManage = kind === 'github' || kind === 'oidc';
 
     const Icon = getSsoIcon(kind, name);
 
@@ -56,8 +57,12 @@ export function ConnectorList<T extends KindAuthConnectors>({
         }
         onSetAsDefault={() => setAsDefault({ type: kind, name })}
         isPlaceholder={false}
-        onEdit={() => navigate(cfg.getEditAuthConnectorRoute(kind, name))}
-        onDelete={onDelete}
+        onEdit={
+          canManage
+            ? () => navigate(cfg.getEditAuthConnectorRoute(kind, name))
+            : undefined
+        }
+        onDelete={canManage ? onDelete : undefined}
         name={name}
       />
     );

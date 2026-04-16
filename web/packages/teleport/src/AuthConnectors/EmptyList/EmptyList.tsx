@@ -17,7 +17,7 @@
  */
 
 import getSsoIcon from 'teleport/AuthConnectors/ssoIcons/getSsoIcon';
-import { State as ResourceState } from 'teleport/components/useResources';
+import { KindAuthConnectors } from 'teleport/services/resources';
 
 import { AuthConnectorTile, LocalConnectorTile } from '../AuthConnectorTile';
 import { AuthConnectorsGrid } from '../ConnectorList/ConnectorList';
@@ -26,6 +26,16 @@ export default function EmptyList({ onCreate, isLocalDefault }: Props) {
   return (
     <AuthConnectorsGrid>
       <LocalConnectorTile isDefault={isLocalDefault} />
+      <AuthConnectorTile
+        key="oidc-placeholder"
+        kind="oidc"
+        id="oidc-placeholder"
+        name={'OIDC'}
+        Icon={getSsoIcon('oidc')}
+        isDefault={false}
+        isPlaceholder={true}
+        onSetup={() => onCreate('oidc')}
+      />
       <AuthConnectorTile
         key="github-placeholder"
         kind="github"
@@ -41,6 +51,6 @@ export default function EmptyList({ onCreate, isLocalDefault }: Props) {
 }
 
 type Props = {
-  onCreate: ResourceState['create'];
+  onCreate: (kind: KindAuthConnectors) => void;
   isLocalDefault: boolean;
 };

@@ -1,0 +1,27 @@
+kind: oidc
+version: v3
+metadata:
+  name: new_oidc_connector
+spec:
+  # OIDC issuer URL, for example https://accounts.google.com
+  issuer_url: https://<issuer-url>
+  # OIDC client ID for the Teleport application
+  client_id: <client-id>
+  # OIDC client secret for the Teleport application
+  client_secret: <client-secret>
+  # One or more callback URLs registered with the provider
+  redirect_url:
+    - 'https://<cluster-url>/v1/webapi/oidc/callback'
+  # Connector display name that will become the title of an SSO login button on
+  # the cluster login screen.
+  display: OIDC
+  # Additional scopes requested from the provider.
+  scope:
+    - openid
+    - email
+  # Mapping of OIDC claims to Teleport roles.
+  claims_to_roles:
+    - claim: groups
+      value: <group-name>
+      roles:
+        - access
