@@ -561,6 +561,18 @@ const cfg = {
     // Assist needs some access request info to exist in OSS
     accessRequestPath: '/v1/enterprise/accessrequest/:requestId?',
 
+    // OSS Access Requests web API.
+    accessRequestsList: '/v1/webapi/sites/:clusterId/accessrequests',
+    accessRequestByIdPath:
+      '/v1/webapi/sites/:clusterId/accessrequests/:requestId',
+    accessRequestReviewPath:
+      '/v1/webapi/sites/:clusterId/accessrequests/:requestId/review',
+    accessRequestSuggestedAccessListsPath:
+      '/v1/webapi/sites/:clusterId/accessrequests/:requestId/suggested-access-lists',
+    requestableRolesPath: '/v1/webapi/sites/:clusterId/requestableroles',
+    requestableResourceRolesPath:
+      '/v1/webapi/sites/:clusterId/requestableroles/resources',
+
     accessGraphFeatures: '/v1/enterprise/accessgraph/static/features.json',
 
     botsTokenPath: '/v1/webapi/sites/:clusterId/machine-id/token',
@@ -1719,6 +1731,42 @@ const cfg = {
 
   getAccessRequestRoute(requestId?: string) {
     return generatePath(cfg.routes.requests, { requestId });
+  },
+
+  getAccessRequestsListUrl(clusterId: string) {
+    return generatePath(cfg.api.accessRequestsList, { clusterId });
+  },
+
+  getAccessRequestByIdUrl(clusterId: string, requestId: string) {
+    return generatePath(cfg.api.accessRequestByIdPath, {
+      clusterId,
+      requestId,
+    });
+  },
+
+  getAccessRequestReviewUrl(clusterId: string, requestId: string) {
+    return generatePath(cfg.api.accessRequestReviewPath, {
+      clusterId,
+      requestId,
+    });
+  },
+
+  getAccessRequestSuggestedAccessListsUrl(
+    clusterId: string,
+    requestId: string
+  ) {
+    return generatePath(cfg.api.accessRequestSuggestedAccessListsPath, {
+      clusterId,
+      requestId,
+    });
+  },
+
+  getRequestableRolesUrl(clusterId: string) {
+    return generatePath(cfg.api.requestableRolesPath, { clusterId });
+  },
+
+  getRequestableResourceRolesUrl(clusterId: string) {
+    return generatePath(cfg.api.requestableResourceRolesPath, { clusterId });
   },
 
   getAccessGraphFeaturesUrl() {

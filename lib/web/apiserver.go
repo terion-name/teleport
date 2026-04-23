@@ -938,6 +938,16 @@ func (h *Handler) bindDefaultEndpoints() {
 	// get login alerts
 	h.GET("/webapi/sites/:site/alerts", h.WithClusterAuth(h.clusterLoginAlertsGet))
 
+	// access requests
+	h.GET("/webapi/sites/:site/accessrequests", h.WithClusterAuth(h.getAccessRequests))
+	h.GET("/webapi/sites/:site/accessrequests/:requestId", h.WithClusterAuth(h.getAccessRequest))
+	h.POST("/webapi/sites/:site/accessrequests", h.WithClusterAuth(h.createAccessRequest))
+	h.DELETE("/webapi/sites/:site/accessrequests/:requestId", h.WithClusterAuth(h.deleteAccessRequest))
+	h.POST("/webapi/sites/:site/accessrequests/:requestId/review", h.WithClusterAuth(h.submitAccessReview))
+	h.GET("/webapi/sites/:site/accessrequests/:requestId/suggested-access-lists", h.WithClusterAuth(h.getAccessRequestSuggestedAccessLists))
+	h.GET("/webapi/sites/:site/requestableroles", h.WithClusterAuth(h.listRequestableRoles))
+	h.POST("/webapi/sites/:site/requestableroles/resources", h.WithClusterAuth(h.getRequestableResourceRoles))
+
 	// lock interactions
 	// TODO(nicholasmarais1158): DELETE IN 20.0.0 - Replaced by /v2/webapi/sites/:site/locks endpoint
 	h.GET("/webapi/sites/:site/locks", h.WithClusterAuth(h.getClusterLocks))

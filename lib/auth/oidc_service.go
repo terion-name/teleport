@@ -547,7 +547,11 @@ func (s *serverOIDCService) oauth2Config(ctx context.Context, connector types.OI
 }
 
 func (s *serverOIDCService) exchangeOIDCToken(ctx context.Context, connector types.OIDCConnector, req *types.OIDCAuthRequest, code string) (*oauth2.Token, string, map[string]any, *gooidc.IDToken, error) {
-	config, err := s.oauth2Config(ctx, connector, req.RedirectURL)
+	redirectURL, err := services.GetRedirectURL(connector, req.ProxyAddress)
+	if err != nil {
+		return nil, "", nil, nil, trace.Wrap(err)
+	}
+	config, err := s.oauth2Config(ctx, connector, redirectURL)
 	if err != nil {
 		return nil, "", nil, nil, trace.Wrap(err)
 	}

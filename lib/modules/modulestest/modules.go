@@ -42,14 +42,18 @@ func OSSModules() *Modules {
 	return &Modules{
 		TestBuildType: modules.BuildOSS,
 		TestFeatures: modules.Features{
+			AdvancedAccessWorkflows: true,
 			Entitlements: map[entitlements.EntitlementKind]modules.EntitlementInfo{
 				entitlements.App:                {Enabled: true, Limit: 0},
 				entitlements.DB:                 {Enabled: true, Limit: 0},
 				entitlements.Desktop:            {Enabled: true, Limit: 0},
 				entitlements.JoinActiveSessions: {Enabled: true, Limit: 0},
 				entitlements.K8s:                {Enabled: true, Limit: 0},
+				entitlements.OIDC:               {Enabled: true, Limit: 0},
+				entitlements.AccessRequests:     {Enabled: true, Limit: 0},
 			},
 		},
+		GenerateAccessRequestPromotionsFn: modules.GenerateOSSAccessRequestPromotions,
 	}
 }
 
@@ -59,6 +63,7 @@ func EnterpriseModules() *Modules {
 	return &Modules{
 		TestBuildType: modules.BuildEnterprise,
 		TestFeatures: modules.Features{
+			AdvancedAccessWorkflows: true,
 			Entitlements: map[entitlements.EntitlementKind]modules.EntitlementInfo{
 				entitlements.App:                {Enabled: true, Limit: 0},
 				entitlements.DB:                 {Enabled: true, Limit: 0},
