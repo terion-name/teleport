@@ -392,8 +392,9 @@ func (p *defaultModules) Features() Features {
 	})
 
 	return Features{
-		AutomaticUpgrades: p.automaticUpgrades,
-		SupportType:       proto.SupportType_SUPPORT_TYPE_FREE,
+		AutomaticUpgrades:       p.automaticUpgrades,
+		SupportType:             proto.SupportType_SUPPORT_TYPE_FREE,
+		AdvancedAccessWorkflows: true,
 		Entitlements: map[entitlements.EntitlementKind]EntitlementInfo{
 			entitlements.App:                {Enabled: true, Limit: 0},
 			entitlements.DB:                 {Enabled: true, Limit: 0},
@@ -401,6 +402,7 @@ func (p *defaultModules) Features() Features {
 			entitlements.JoinActiveSessions: {Enabled: true, Limit: 0},
 			entitlements.K8s:                {Enabled: true, Limit: 0},
 			entitlements.OIDC:               {Enabled: true, Limit: 0},
+			entitlements.AccessRequests:     {Enabled: true, Limit: 0},
 		},
 	}
 }
@@ -425,10 +427,10 @@ func (p *defaultModules) GenerateLongTermResourceGrouping(_ context.Context, _ A
 	return &types.LongTermResourceGrouping{}, nil
 }
 
-// GenerateAccessRequestPromotions is a noop since OSS teleport does not support generating access list promotions.
-func (p *defaultModules) GenerateAccessRequestPromotions(_ context.Context, _ AccessResourcesGetter, _ types.AccessRequest) (*types.AccessRequestAllowedPromotions, error) {
-	// The default module does not support generating access list promotions.
-	return types.NewAccessRequestAllowedPromotions(nil), nil
+// GenerateAccessRequestPromotions returns the access lists that could promote the request.
+// See [generateAccessRequestPromotions] for the algorithm.
+func (p *defaultModules) GenerateAccessRequestPromotions(ctx context.Context, clt AccessResourcesGetter, req types.AccessRequest) (*types.AccessRequestAllowedPromotions, error) {
+	return generateAccessRequestPromotions(ctx, clt, req)
 }
 
 // GenerateAccessRequestSuggestedReviewers is a noop for OSS teleport.
@@ -436,10 +438,40 @@ func (p *defaultModules) GenerateAccessRequestSuggestedReviewers(context.Context
 	return []string{}, nil
 }
 
+// GetSuggestedAccessLists returns the fully-hydrated access lists that could promote the given
+// access request. It reads the pre-computed promotions persisted at request-create time and
+// resolves each AccessListName against the access list getter.
 func (p *defaultModules) GetSuggestedAccessLists(ctx context.Context, identity *tlsca.Identity, clt AccessListSuggestionClient,
 	accessListGetter AccessListAndMembersGetter, requestID string,
 ) ([]*accesslist.AccessList, error) {
-	return nil, trace.NotImplemented("GetSuggestedAccessLists not implemented")
+	reqs, err := clt.GetAccessRequests(ctx, types.AccessRequestFilter{ID: requestID})
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	if len(reqs) == 0 {
+		return nil, trace.NotFound("access request %q not found", requestID)
+	}
+
+	promotions, err := clt.GetAccessRequestAllowedPromotions(ctx, reqs[0])
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	if promotions == nil {
+		return nil, nil
+	}
+
+	out := make([]*accesslist.AccessList, 0, len(promotions.Promotions))
+	for _, p := range promotions.Promotions {
+		list, err := accessListGetter.GetAccessList(ctx, p.AccessListName)
+		if err != nil {
+			if trace.IsNotFound(err) {
+				continue
+			}
+			return nil, trace.Wrap(err)
+		}
+		out = append(out, list)
+	}
+	return out, nil
 }
 
 // EnableRecoveryCodes enables recovery codes. This is a noop since OSS teleport does not

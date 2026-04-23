@@ -21,6 +21,7 @@ import { UserPreferences } from 'gen-proto-ts/teleport/userpreferences/v1/userpr
 import cfg from 'teleport/config';
 
 import { notificationContentFactory } from './Notifications';
+import { AccessRequestService } from './services/accessRequests';
 import { agentService } from './services/agents';
 import appService from './services/apps';
 import AuditService from './services/audit';
@@ -63,6 +64,7 @@ class TeleportContext implements types.Context {
   userGroupService = userGroupService;
   mfaService = new MfaService();
   notificationService = new NotificationService();
+  accessRequestService = new AccessRequestService();
   yamlService = yamlService;
 
   notificationContentFactory = notificationContentFactory;

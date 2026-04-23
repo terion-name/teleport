@@ -1,6 +1,6 @@
 /**
  * Teleport
- * Copyright (C) 2023  Gravitational, Inc.
+ * Copyright (C) 2026 Gravitational, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published by
@@ -16,5 +16,6 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-export { AccessRequests } from './AccessRequests';
-export { LockedAccessRequests } from './LockedAccessRequests/LockedAccessRequests';
+export { AccessRequestService } from './accessRequestService';
+export { default as accessRequestService } from './accessRequestService';
+export * from './types';

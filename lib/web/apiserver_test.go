@@ -5094,7 +5094,7 @@ func TestGetWebConfig_WithEntitlements(t *testing.T) {
 				string(entitlements.AccessGraphDemoMode):        {Enabled: false},
 				string(entitlements.AccessLists):                {Enabled: false},
 				string(entitlements.AccessMonitoring):           {Enabled: false},
-				string(entitlements.AccessRequests):             {Enabled: false},
+				string(entitlements.AccessRequests):             {Enabled: true},
 				string(entitlements.App):                        {Enabled: true},
 				string(entitlements.Beams):                      {Enabled: false},
 				string(entitlements.ClientIPRestrictions):       {Enabled: false},
@@ -5110,7 +5110,7 @@ func TestGetWebConfig_WithEntitlements(t *testing.T) {
 				string(entitlements.K8s):                        {Enabled: true},
 				string(entitlements.LicenseAutoUpdate):          {Enabled: false},
 				string(entitlements.MobileDeviceManagement):     {Enabled: false},
-				string(entitlements.OIDC):                       {Enabled: false},
+				string(entitlements.OIDC):                       {Enabled: true},
 				string(entitlements.OktaSCIM):                   {Enabled: false},
 				string(entitlements.OktaUserSync):               {Enabled: false},
 				string(entitlements.Policy):                     {Enabled: false},
@@ -5176,6 +5176,8 @@ func TestGetWebConfig_WithEntitlements(t *testing.T) {
 		expectedCfg.Entitlements[string(entitlements.Desktop)] = webclient.EntitlementInfo{Enabled: true, Limit: 44}
 		expectedCfg.Entitlements[string(entitlements.JoinActiveSessions)] = webclient.EntitlementInfo{Enabled: false}
 		expectedCfg.Entitlements[string(entitlements.K8s)] = webclient.EntitlementInfo{Enabled: false}
+		expectedCfg.Entitlements[string(entitlements.OIDC)] = webclient.EntitlementInfo{Enabled: false}
+		expectedCfg.Entitlements[string(entitlements.AccessRequests)] = webclient.EntitlementInfo{Enabled: false}
 
 		// Advance time to unblock the feature watcher. Wait until
 		// the features have been retrieved and the feature watcher is blocked
